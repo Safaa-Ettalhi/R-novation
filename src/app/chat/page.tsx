@@ -126,7 +126,7 @@ export default function ChatPage() {
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'ia',
-        content: "Une erreur de connexion est survenue. L'API est-elle bien configurée ?"
+        content: "Désolé, je n'ai pas pu répondre pour le moment. Réessaie dans quelques secondes."
       }]);
     }
   };
