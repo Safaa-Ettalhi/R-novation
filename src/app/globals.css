@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #092c56;
+  --color-primaryLight: #123e75;
+  --color-accent: #c9a84c;
+  --color-accentHover: #b5953e;
+  --color-bgLight: #f8f9fa;
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-bgLight text-gray-800 antialiased selection:bg-accent selection:text-white flex flex-col min-h-screen;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+/* Custom Utilities for the chat */
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
