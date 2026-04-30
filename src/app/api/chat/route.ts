@@ -43,7 +43,7 @@ Règles strictes que tu dois respecter :
     try {
       // 1. Try Gemini directly
       const result = await generateText({
-        model: google('gemini-1.5-pro'),
+        model: google('gemini-2.5-flash'),
         system: systemPrompt,
         prompt: promptText
       });

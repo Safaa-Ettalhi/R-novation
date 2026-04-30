@@ -32,7 +32,7 @@ Ne retourne QUE le JSON valide, sans balises markdown ni texte autour.`;
     try {
       // 1. Try Gemini
       const result = await generateText({
-        model: google('gemini-1.5-pro'),
+        model: google('gemini-2.5-flash'),
         system: systemPrompt,
         prompt: promptText
       });
