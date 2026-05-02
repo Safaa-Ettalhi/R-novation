@@ -115,6 +115,8 @@ export default function Navbar() {
     setUserMenuOpen(false);
     setMobileOpen(false);
     await supabase.auth.signOut();
+    // Force full page navigation so any protected page state is cleared
+    window.location.href = '/';
   };
 
   const loggedIn = Boolean(session?.user);
