@@ -26,7 +26,7 @@ export default function ResetPasswordPage() {
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
-    
+
     if (password !== confirmPassword) {
       setMessage({ type: 'err', text: 'Les mots de passe ne correspondent pas.' });
       return;
@@ -45,7 +45,7 @@ export default function ResetPasswordPage() {
       });
 
       if (error) throw error;
-      
+
       setMessage({ type: 'ok', text: 'Votre mot de passe a été réinitialisé avec succès.' });
       setTimeout(() => {
         router.push('/auth/login');
@@ -72,9 +72,8 @@ export default function ResetPasswordPage() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10">
           {message && (
-            <div className={`mb-6 px-4 py-3 rounded-md text-sm ${
-              message.type === 'ok' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-600'
-            }`}>
+            <div className={`mb-6 px-4 py-3 rounded-md text-sm ${message.type === 'ok' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-600'
+              }`}>
               {message.text}
             </div>
           )}
@@ -93,7 +92,7 @@ export default function ResetPasswordPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition"
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
@@ -113,7 +112,7 @@ export default function ResetPasswordPage() {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition"
                 >
                   {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
