@@ -3,37 +3,7 @@ import Link from 'next/link';
 export default function Home() {
   return (
     <>
-      <nav className="bg-white/95 backdrop-blur-md fixed w-full z-50 border-b border-gray-100 shadow-sm top-0 transition-all">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-20">
-            {/* Logo */}
-            <div className="flex-shrink-0 flex items-center gap-3 cursor-pointer">
-              <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shadow-lg">
-                <svg className="w-6 h-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-primary tracking-tight">LES ARTISTES</h1>
-                <p className="text-[10px] uppercase tracking-[0.2em] text-accent font-semibold -mt-1">Rénovation</p>
-              </div>
-            </div>
-
-            {/* Desktop Menu */}
-            <div className="hidden md:flex items-center space-x-8">
-              <Link href="#" className="text-sm font-semibold text-gray-600 hover:text-primary transition">Nos Services</Link>
-              <Link href="#" className="text-sm font-semibold text-gray-600 hover:text-primary transition">Réalisations</Link>
-              <Link href="#" className="text-sm font-semibold text-gray-600 hover:text-primary transition">Contact</Link>
-              
-              {/* CTA Button */}
-              <Link href="/chat" className="flex items-center space-x-2 bg-primary text-white px-5 py-2.5 rounded-full font-semibold text-sm hover:bg-primaryLight shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all">
-                <svg className="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-                <span>Estimer avec l'IA</span>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <main className="flex-grow pt-20">
+      <main className="flex-grow">
         <div className="relative bg-primary">
           <div className="absolute inset-0 z-0">
             <img src="/renovation_hero.png" alt="Intérieur rénové" className="w-full h-full object-cover opacity-40" />
@@ -66,7 +36,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="py-24 bg-white">
+        <div id="expertise" className="py-24 bg-white scroll-mt-24">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-16">
               <h2 className="text-3xl font-bold text-primary mb-4">Notre Expertise</h2>
