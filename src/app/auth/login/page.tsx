@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Eye, EyeOff } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,16 +15,26 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    
+    // Forcer la déconnexion si une session existe (ex: après confirmation email)
+    const checkAndClearSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        await supabase.auth.signOut();
+        router.replace('/auth/login');
+      }
+    };
+    checkAndClearSession();
+
     const q = new URLSearchParams(window.location.search);
     if (q.get('registered') === '1') {
-      setInfo(
-        'Compte créé. ouvrez le message reçu et cliquez sur le lien avant de vous connecter.'
-      );
+      setInfo('Veuillez vérifier votre email pour confirmer votre compte.');
     }
-  }, []);
+  }, [router]);
 
   const handleResendConfirmation = async () => {
     setError('');
@@ -41,7 +52,7 @@ export default function LoginPage() {
         options: origin ? { emailRedirectTo: `${origin}/auth/login` } : undefined,
       });
       if (resendError) throw resendError;
-      setInfo('E-mail de confirmation renvoyé. Vérifiez votre boîte de réception et vos courriers indésirables.');
+      setInfo('Veuillez vérifier votre email pour confirmer votre compte.');
       setNeedsEmailConfirmation(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Impossible de renvoyer l’e-mail.';
@@ -73,9 +84,7 @@ export default function LoginPage() {
         const msg = (signInError.message || '').toLowerCase();
         if (code === 'email_not_confirmed' || msg.includes('email not confirmed')) {
           setNeedsEmailConfirmation(true);
-          setError(
-            'Votre e-mail n’est pas encore confirmé. Utilisez le bouton ci-dessous pour renvoyer le lien, ou désactivez « Confirm email » dans Supabase (Authentication → Providers → Email) en développement.'
-          );
+          setError('Veuillez vérifier votre email pour confirmer votre compte.');
           setLoading(false);
           return;
         }
@@ -183,15 +192,22 @@ export default function LoginPage() {
                   Mot de passe oublié ?
                 </Link>
               </div>
-              <div className="mt-1">
+              <div className="mt-1 relative">
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="appearance-none block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+                  className="appearance-none block w-full px-3 py-2 pr-10 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
               </div>
             </div>
 
