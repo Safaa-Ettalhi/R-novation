@@ -41,7 +41,7 @@ Ne retourne QUE le JSON valide, sans balises markdown ni texte autour.`;
       console.warn("Gemini API failed, falling back to OpenRouter", e);
       // 2. Fallback to OpenRouter
       const fallbackResult = await generateText({
-        model: openrouter('openai/gpt-4o-mini'),
+        model: openrouter('nvidia/nemotron-3-nano-30b-a3b:free'),
         system: systemPrompt,
         prompt: promptText
       });
