@@ -37,24 +37,42 @@ Règles strictes que tu dois respecter :
 6. Si l'utilisateur a envoyé une image (indiqué par le contexte), analyse le contexte et donne une hypothèse réaliste du problème.
 7. Si l'utilisateur demande un devis, fournis une estimation structurée en texte contenant : type de réparation, prix estimé, main d'œuvre, total.`;
 
-    const promptText = messages.map((m: any) => `${m.role}: ${m.content}`).join('\n');
+    const coreMessages: any[] = messages.map((m: any) => {
+      if (m.isImage && m.content.startsWith('data:image')) {
+        return {
+          role: m.role,
+          content: [
+            { type: 'image', image: m.content.split(',')[1] }
+          ]
+        };
+      }
+      return {
+        role: m.role,
+        content: m.content
+      };
+    });
 
     let text;
     try {
-      // 1. Try Gemini directly
+      // 1. Try Gemini natively with multimodal support
       const result = await generateText({
         model: google('gemini-2.5-flash'),
         system: systemPrompt,
-        prompt: promptText
+        messages: coreMessages
       });
       text = result.text;
     } catch (e) {
       console.warn("Gemini API failed, falling back to OpenRouter", e);
-      // 2. Fallback to OpenRouter
+      const fallbackMessages = messages.map((m: any) => ({
+        role: m.role,
+        content: m.isImage ? '[Utilisateur a envoyé une image]' : m.content
+      }));
+
+      // 2. Fallback to OpenRouter (text-only)
       const fallbackResult = await generateText({
-        model: openrouter('openai/gpt-4o-mini'),
+        model: openrouter('nvidia/nemotron-3-nano-30b-a3b:free'),
         system: systemPrompt,
-        prompt: promptText
+        messages: fallbackMessages
       });
       text = fallbackResult.text;
     }
