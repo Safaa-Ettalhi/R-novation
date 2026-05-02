@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import Link from 'next/link';
 import ChatBubble from '@/components/Chat/ChatBubble';
 import MessageInput from '@/components/Chat/MessageInput';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
-export type Role = 'user' | 'ia' | 'expert';
+export type Role = 'user' | 'ia' | 'expert' | 'system';
 
 export interface Message {
   id: string;
@@ -25,8 +25,47 @@ export default function ChatPage() {
   ]);
   const [isExpertMode, setIsExpertMode] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  
+  const [guestId, setGuestId] = useState<string>('');
+  const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+
+  const viewerId = sessionUserId ?? guestId;
+
+  // Realtime State
+  const [realtimeRequestId, setRealtimeRequestId] = useState<string | null>(null);
+  const [isMatchmaking, setIsMatchmaking] = useState(false);
+  const [isExpertConnected, setIsExpertConnected] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Generate or retrieve Guest ID
+    let storedId = localStorage.getItem('les_artistes_guest_id');
+    if (!storedId) {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        storedId = crypto.randomUUID();
+      } else {
+        storedId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      }
+      localStorage.setItem('les_artistes_guest_id', storedId);
+    }
+    setGuestId(storedId);
+  }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSessionUserId(session?.user?.id ?? null);
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionUserId(session?.user?.id ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -36,44 +75,148 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const toggleExpertMode = () => {
-    setIsExpertMode(!isExpertMode);
-    if (!isExpertMode) {
-      setIsTyping(true);
-      setTimeout(() => {
-        setIsTyping(false);
+  // Écoute Supabase si on est en matchmaking
+  useEffect(() => {
+    if (!realtimeRequestId || !isSupabaseConfigured) return;
+
+    // Écouter les changements sur la demande (ex: un expert accepte)
+    const requestSub = supabase
+      .channel(`public:support_requests:id=eq.${realtimeRequestId}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'support_requests', filter: `id=eq.${realtimeRequestId}` }, payload => {
+        if (payload.new.status === 'active') {
+          setIsMatchmaking(false);
+          setIsExpertConnected(true);
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'system',
+            content: "Un expert vient de rejoindre la conversation en direct."
+          }]);
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            new Notification('Les Artistes', { body: 'Un expert a rejoint la conversation.' });
+          }
+        }
+      })
+      .subscribe();
+
+    // Écouter les nouveaux messages
+    const messageSub = supabase
+      .channel(`public:messages:request_id=eq.${realtimeRequestId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${realtimeRequestId}` }, payload => {
+        const newMsg = payload.new;
+        if (String(newMsg.sender_id) !== String(viewerId)) {
+          setMessages(prev => [...prev, { id: newMsg.id, role: newMsg.role as Role, content: newMsg.content }]);
+          setIsTyping(false);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(requestSub);
+      supabase.removeChannel(messageSub);
+    };
+  }, [realtimeRequestId, viewerId]);
+
+  const toggleExpertMode = async () => {
+    if (isMatchmaking || isExpertConnected) {
+      // Disconnect or cancel
+      setIsExpertMode(false);
+      setIsMatchmaking(false);
+      setIsExpertConnected(false);
+      setRealtimeRequestId(null);
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'ia',
+        content: "Connexion avec l'artisan terminée. L'IA reprend le relais."
+      }]);
+      // TODO: Update request status to 'cancelled' or 'resolved' in Supabase
+      return;
+    }
+
+    setIsExpertMode(true);
+    await requestHumanExpert();
+  };
+
+  const requestHumanExpert = async () => {
+    if (!isSupabaseConfigured) {
+      setIsExpertMode(false);
+      setIsMatchmaking(false);
+      setMessages(prev => [...prev, {
+        id: Date.now().toString(),
+        role: 'ia',
+        content: 'Pour parler à un expert humain, ajoutez NEXT_PUBLIC_SUPABASE_URL et NEXT_PUBLIC_SUPABASE_ANON_KEY dans votre fichier .env (projet Supabase), puis redémarrez le serveur.'
+      }]);
+      return;
+    }
+
+    setIsMatchmaking(true);
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
+    setMessages(prev => [...prev, {
+      id: Date.now().toString(),
+      role: 'user',
+      content: "Je souhaite parler à un expert humain."
+    }]);
+
+    try {
+      if (!viewerId) {
+        setIsMatchmaking(false);
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
-          role: 'expert',
-          content: "Bonjour, je suis l'expert en rénovation de l'équipe. Je prends le relais. Souhaitez-vous générer un devis ou voulez-vous plus de détails sur nos méthodes d'intervention ?"
+          role: 'ia',
+          content: 'Impossible de démarrer la mise en relation : identifiant temporaire indisponible. Réessayez dans un instant.'
         }]);
-      }, 1500);
+        return;
+      }
+      const res = await fetch('/api/matchmake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages, userId: viewerId })
+      });
+      const data = await res.json();
+      
+      if (data.requestId) {
+        setRealtimeRequestId(data.requestId);
+        setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'ia',
+          content: `J'ai détecté que votre problème concerne : ${data.domain}. Je cherche un artisan qualifié disponible pour prendre le relais...`
+        }]);
+      }
+    } catch (e) {
+      setIsMatchmaking(false);
+      console.error(e);
     }
   };
 
   const handleSendMessage = async (text: string, imageBase64: string | null) => {
+    const tempId = Date.now().toString();
+    
     if (imageBase64) {
-      setMessages(prev => [...prev, { id: Date.now().toString() + 'img', role: 'user', content: imageBase64, isImage: true }]);
+      setMessages(prev => [...prev, { id: tempId + 'img', role: 'user', content: imageBase64, isImage: true }]);
       if (text) {
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
+        setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
       }
     } else {
-      setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: text }]);
+      setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
+    }
+
+    if (isExpertConnected && realtimeRequestId && isSupabaseConfigured) {
+      // Envoyer le message via Supabase Realtime
+      await supabase.from('messages').insert({
+        request_id: realtimeRequestId,
+        sender_id: viewerId,
+        content: text || (imageBase64 ? '[Image]' : ''),
+        role: 'user',
+      });
+      return; // Ne pas appeler l'API IA
     }
 
     setIsTyping(true);
 
     try {
+      // The backend API now handles multimodal images natively.
       let imageAnalysis = "";
-      if (imageBase64) {
-        const analyzeRes = await fetch('/api/analyze-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: imageBase64 })
-        });
-        const analyzeData = await analyzeRes.json();
-        imageAnalysis = analyzeData.description || "problème identifié";
-      }
 
       const lowerText = text.toLowerCase();
       if (isExpertMode && (lowerText.includes('devis') || lowerText.includes('estimation') || lowerText.includes('prix'))) {
@@ -106,7 +249,15 @@ export default function ChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: messages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.isImage ? '[Image uploaded]' : m.content })).concat([{ role: 'user', content: text + (imageAnalysis ? `\n(Contexte image: ${imageAnalysis})` : '') }]),
+          messages: messages.map(m => ({ 
+            role: m.role === 'user' ? 'user' : 'assistant', 
+            content: m.content,
+            isImage: m.isImage
+          })).concat(
+             imageBase64 ? [{ role: 'user', content: imageBase64, isImage: true }] : []
+          ).concat(
+             text ? [{ role: 'user', content: text, isImage: false }] : []
+          ),
           isExpertMode
         })
       });
@@ -126,34 +277,14 @@ export default function ChatPage() {
       setMessages(prev => [...prev, {
         id: Date.now().toString(),
         role: 'ia',
-        content: "Désolé, je n'ai pas pu répondre pour le moment. Réessaie dans quelques secondes."
+        content: "Une erreur de connexion est survenue."
       }]);
     }
   };
 
   return (
     <>
-      <nav className="bg-white shadow-sm border-b border-gray-100 fixed w-full z-20 top-0">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-20">
-            <Link href="/" className="flex items-center space-x-3 cursor-pointer group">
-              <div className="w-10 h-10 bg-primary rounded flex items-center justify-center shadow-inner group-hover:bg-primaryLight transition">
-                <span className="text-accent font-serif font-bold text-xl">A</span>
-              </div>
-              <span className="font-serif font-bold text-2xl text-primary tracking-wide uppercase group-hover:opacity-80 transition">Les Artistes</span>
-            </Link>
-            <div className="flex items-center space-x-6">
-              <Link href="/" className="text-gray-600 hover:text-primary font-medium transition text-sm hidden sm:block">Accueil</Link>
-              <a href="#assistant" className="text-white bg-primary hover:bg-primaryLight px-5 py-2.5 rounded-md font-medium transition shadow-md text-sm flex items-center space-x-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
-                <span>Discuter avec l'IA</span>
-              </a>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <main className="flex-grow pt-28 pb-12 px-4 sm:px-6 flex flex-col items-center justify-center min-h-screen">
+      <main className="flex-grow pb-12 px-4 sm:px-6 flex flex-col items-center justify-center min-h-[calc(100vh-5rem)] pt-6 sm:pt-10">
         
         {/* Header Text */}
         <div className="text-center max-w-2xl mb-10 fade-in">
@@ -171,19 +302,23 @@ export default function ChatPage() {
                 <div className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center">
                   <svg className="w-6 h-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
                 </div>
-                <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-primary rounded-full"></span>
+                <span className={`absolute bottom-0 right-0 w-3 h-3 border-2 border-primary rounded-full ${isExpertConnected ? 'bg-accent' : 'bg-green-400'}`}></span>
               </div>
               <div>
                 <h2 className="font-bold text-lg leading-tight">
-                  {isExpertMode ? "Expert Travaux" : "Assistant Les Artistes"}
+                  {isExpertConnected ? "Artisan Réel Connecté" : (isExpertMode ? "Expert IA" : "Assistant Les Artistes")}
                 </h2>
-                <p className="text-xs text-blue-200">En ligne</p>
+                <p className="text-xs text-blue-200">
+                  {isMatchmaking ? "Recherche en cours..." : "En ligne"}
+                </p>
               </div>
             </div>
 
-            {/* Toggle Switch (IA / Expert) */}
+            {/* Actions Droite */}
             <div className="flex items-center space-x-3">
-              <span id="mode-label" className="text-blue-100 font-medium text-sm transition-colors hidden sm:block">Mode IA</span>
+              <span id="mode-label" className="text-blue-100 font-medium text-sm transition-colors hidden sm:block">
+                {isMatchmaking ? 'Recherche...' : (isExpertConnected ? 'Connecté' : 'Mode IA')}
+              </span>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" id="toggle-mode" className="sr-only peer" checked={isExpertMode} onChange={toggleExpertMode} />
                 <div className="w-11 h-6 bg-blue-900 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent border border-blue-800"></div>
@@ -197,7 +332,7 @@ export default function ChatPage() {
               <ChatBubble key={msg.id} message={msg} />
             ))}
             
-            {isTyping && (
+            {(isTyping || isMatchmaking) && (
               <div className="flex w-full justify-start fade-in">
                 <div className="bg-white border border-gray-100 shadow-sm rounded-2xl rounded-tl-sm px-5 py-4 max-w-[70%] text-gray-700 flex items-center gap-1.5">
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
