@@ -57,7 +57,9 @@ export default function ChatPage() {
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSessionUserId(session?.user?.id ?? null);
+      const uid = session?.user?.id ?? null;
+      setSessionUserId(uid);
+      if (uid) restoreHistory(uid);
     });
     const {
       data: { subscription },
@@ -66,6 +68,48 @@ export default function ChatPage() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  const restoreHistory = async (userId: string) => {
+    // Find the most recent pending or active request for this user
+    const { data: reqData } = await supabase
+      .from('support_requests')
+      .select('id, status, domain')
+      .eq('user_id', userId)
+      .in('status', ['pending', 'active'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!reqData) return;
+
+    setRealtimeRequestId(reqData.id);
+    if (reqData.status === 'active') {
+      setIsExpertConnected(true);
+      setIsMatchmaking(false);
+    } else {
+      setIsMatchmaking(true);
+    }
+
+    const { data: msgs } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('request_id', reqData.id)
+      .order('created_at', { ascending: true });
+
+    if (msgs && msgs.length > 0) {
+      const restored: Message[] = msgs.map((m: any) => ({
+        id: m.id,
+        role: m.role as Role,
+        content: m.content,
+        isImage: m.is_image ?? false,
+      }));
+      setMessages(prev => {
+        // Keep only the initial IA welcome, then append history
+        const welcome = prev.filter(p => p.role === 'ia' && p.id === '1');
+        return [...welcome, ...restored];
+      });
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -104,7 +148,12 @@ export default function ChatPage() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${realtimeRequestId}` }, payload => {
         const newMsg = payload.new;
         if (String(newMsg.sender_id) !== String(viewerId)) {
-          setMessages(prev => [...prev, { id: newMsg.id, role: newMsg.role as Role, content: newMsg.content }]);
+          setMessages(prev => [...prev, {
+            id: newMsg.id,
+            role: newMsg.role as Role,
+            content: newMsg.content,
+            isImage: newMsg.is_image ?? false,
+          }]);
           setIsTyping(false);
         }
       })
@@ -202,14 +251,27 @@ export default function ChatPage() {
     }
 
     if (isExpertConnected && realtimeRequestId && isSupabaseConfigured) {
-      // Envoyer le message via Supabase Realtime
-      await supabase.from('messages').insert({
-        request_id: realtimeRequestId,
-        sender_id: viewerId,
-        content: text || (imageBase64 ? '[Image]' : ''),
-        role: 'user',
-      });
-      return; // Ne pas appeler l'API IA
+      // Send image message
+      if (imageBase64) {
+        await supabase.from('messages').insert({
+          request_id: realtimeRequestId,
+          sender_id: viewerId,
+          content: imageBase64,
+          role: 'user',
+          is_image: true,
+        });
+      }
+      // Send text message
+      if (text) {
+        await supabase.from('messages').insert({
+          request_id: realtimeRequestId,
+          sender_id: viewerId,
+          content: text,
+          role: 'user',
+          is_image: false,
+        });
+      }
+      return; // Do not call AI API
     }
 
     setIsTyping(true);
