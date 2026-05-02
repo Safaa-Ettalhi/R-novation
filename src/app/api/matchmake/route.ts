@@ -65,13 +65,12 @@ Ne retourne aucun texte supplémentaire.`;
     // Créer une demande de support dans Supabase
     const requestId = randomUUID();
 
-    // Ensure the user profile exists to satisfy foreign key constraints
-    await supabase.from('profiles').upsert({
-      id: userId,
-      email: `${userId}@guest.local`,
-      full_name: 'Invité',
-      role: 'guest',
-    });
+    // Guard: only insert a guest profile if none exists.
+    // Using onConflict('id').ignore() ensures we never overwrite an existing client/expert profile.
+    await supabase.from('profiles').upsert(
+      { id: userId, email: `${userId}@guest.local`, full_name: 'Invité', role: 'guest' },
+      { onConflict: 'id', ignoreDuplicates: true }
+    );
 
     const { data: requestData, error: requestError } = await supabase
       .from('support_requests')
@@ -92,19 +91,20 @@ Ne retourne aucun texte supplémentaire.`;
 
     // Copier l'historique de chat dans la table messages
     for (const msg of messages) {
-      if (msg.isImage || msg.isEstimate) continue; // On ignore les contenus complexes pour cette démo
+      if (msg.isEstimate) continue; // skip estimate cards
       await supabase.from('messages').insert({
         request_id: requestId,
-        sender_id: userId, // Simplification
-        content: msg.content,
-        role: msg.role === 'user' ? 'user' : 'ia'
+        sender_id: userId,
+        content: msg.content,  // images (base64) are stored as-is so expert can view them
+        role: msg.role === 'user' ? 'user' : 'ia',
+        is_image: !!msg.isImage,
       });
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      requestId: requestId, 
-      domain: parsed.domain 
+    return NextResponse.json({
+      success: true,
+      requestId: requestId,
+      domain: parsed.domain
     });
 
   } catch (error) {
