@@ -14,6 +14,7 @@
     "@capacitor/android": "^8.3.1",
     "@capacitor/core": "^8.3.1",
     "@capacitor/ios": "^8.3.1",
+    "@supabase/supabase-js": "^2.105.1",
     "ai": "^6.0.171",
     "lucide-react": "^1.14.0",
     "next": "16.2.4",
