@@ -15,6 +15,16 @@ export default function ChatBubble({ message }: { message: Message }) {
     }
   }
 
+  if (message.role === 'system') {
+    return (
+      <div className="flex w-full justify-center fade-in mb-4">
+        <div className="px-4 py-2 rounded-full bg-accent/15 border border-accent/30 text-xs sm:text-sm text-primary font-medium text-center max-w-[90%]">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
   const isUser = message.role === 'user';
   const isExpert = message.role === 'expert';
 
