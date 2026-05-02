@@ -18,23 +18,23 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    
-    // Forcer la déconnexion si une session existe (ex: après confirmation email)
-    const checkAndClearSession = async () => {
+    // Si une session existe déjà (ex: après confirmation email), on force le logout
+    // pour éviter d'avoir le formulaire de login ET l'état connecté en même temps.
+    const checkSession = async () => {
       const { data } = await supabase.auth.getSession();
       if (data.session) {
         await supabase.auth.signOut();
-        router.replace('/auth/login');
+        // Optionnel: rafraîchir pour nettoyer tout état global
+        window.location.reload();
       }
     };
-    checkAndClearSession();
+    checkSession();
 
     const q = new URLSearchParams(window.location.search);
     if (q.get('registered') === '1') {
       setInfo('Veuillez vérifier votre email pour confirmer votre compte.');
     }
-  }, [router]);
+  }, []);
 
   const handleResendConfirmation = async () => {
     setError('');
@@ -52,7 +52,7 @@ export default function LoginPage() {
         options: origin ? { emailRedirectTo: `${origin}/auth/login` } : undefined,
       });
       if (resendError) throw resendError;
-      setInfo('Veuillez vérifier votre email pour confirmer votre compte.');
+      setInfo('E-mail de confirmation renvoyé. Vérifiez votre boîte de réception et vos courriers indésirables.');
       setNeedsEmailConfirmation(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Impossible de renvoyer l’e-mail.';
@@ -84,7 +84,9 @@ export default function LoginPage() {
         const msg = (signInError.message || '').toLowerCase();
         if (code === 'email_not_confirmed' || msg.includes('email not confirmed')) {
           setNeedsEmailConfirmation(true);
-          setError('Veuillez vérifier votre email pour confirmer votre compte.');
+          setError(
+            'Votre e-mail n’est pas encore confirmé. Utilisez le bouton ci-dessous pour renvoyer le lien, ou désactivez « Confirm email » dans Supabase (Authentication → Providers → Email) en développement.'
+          );
           setLoading(false);
           return;
         }
@@ -204,9 +206,9 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 transition"
                 >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
             </div>
