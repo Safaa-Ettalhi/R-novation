@@ -85,17 +85,24 @@ export default function ExpertDashboard() {
 
     const msgSub = supabase
       .channel(`expert_msgs_${activeRequest.id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${activeRequest.id}` }, payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${activeRequest.id}` }, async payload => {
         const m = payload.new as any;
         // Only add incoming messages (not our own, already added optimistically)
         if (String(m.sender_id) !== String(expertId)) {
           // Skip the expert-only system join message on client side
           if (m.role === 'system' && m.content === 'Vous avez rejoint la discussion.') return;
+          // Fetch sender name (usually the client)
+          let senderName: string | undefined;
+          if (m.sender_id) {
+            const { data: sp } = await supabase.from('profiles').select('full_name').eq('id', m.sender_id).single();
+            senderName = sp?.full_name ?? undefined;
+          }
           setMessages(prev => [...prev, {
             id: m.id,
             role: m.role as Message['role'],
             content: m.content,
             isImage: m.is_image ?? false,
+            senderName,
           }]);
           triggerNotification('Nouveau message du client');
         }
@@ -138,8 +145,7 @@ export default function ExpertDashboard() {
 
   /**
    * Fetch the full message history for a request and restore it.
-   * Filters out the expert-only "Vous avez rejoint" system message
-   * that should NOT be shown to clients.
+   * Also enriches each message with the sender's real name.
    */
   const fetchMessages = async (requestId: string) => {
     const { data } = await supabase
@@ -148,14 +154,26 @@ export default function ExpertDashboard() {
       .eq('request_id', requestId)
       .order('created_at', { ascending: true });
 
-    if (data) {
-      setMessages(data.map((m: any) => ({
-        id: m.id,
-        role: m.role as Message['role'],
-        content: m.content,
-        isImage: m.is_image ?? false,
-      })));
+    if (!data) return;
+
+    // Build a profile name map for all senders in one query
+    const senderIds = [...new Set(data.filter((m: any) => m.sender_id).map((m: any) => m.sender_id))];
+    const profileMap: Record<string, string> = {};
+    if (senderIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', senderIds);
+      profiles?.forEach((p: any) => { if (p.full_name) profileMap[p.id] = p.full_name; });
     }
+
+    setMessages(data.map((m: any) => ({
+      id: m.id,
+      role: m.role as Message['role'],
+      content: m.content,
+      isImage: m.is_image ?? false,
+      senderName: m.sender_id ? profileMap[m.sender_id] : undefined,
+    })));
   };
 
   /**
@@ -189,13 +207,13 @@ export default function ExpertDashboard() {
   };
 
   /**
-   * Send a message as the expert — optimistically adds to local state,
+   * Send a message as the expert — optimistically adds to local state with real name,
    * then persists to Supabase.
    */
   const sendExpertMessage = async (requestId: string, text: string) => {
     if (!expertId) return;
     const msgId = crypto.randomUUID();
-    const newMsg: Message = { id: msgId, role: 'expert', content: text };
+    const newMsg: Message = { id: msgId, role: 'expert', content: text, senderName: expertName };
     setMessages(prev => [...prev, newMsg]);
     await supabase.from('messages').insert({
       id: msgId,
