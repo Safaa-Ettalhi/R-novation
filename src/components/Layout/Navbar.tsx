@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bell, ChevronDown, Home, LayoutDashboard, LogOut, Menu, User, X } from 'lucide-react';
+import { Bell, ChevronDown, Home, LayoutDashboard, LogOut, Menu, MessageSquare, User, X } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { ProfileRole } from '@/lib/profile-roles';
 import { IconChatEstimator, IconLogoBuilding } from '@/components/Layout/NavIcons';
@@ -16,12 +16,14 @@ export default function Navbar() {
     domains?: string[] | null;
     full_name?: string | null;
   } | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true); // Prevent flash before role is known
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [expertPendingCount, setExpertPendingCount] = useState(0);
   const [navToast, setNavToast] = useState<string | null>(null);
 
   const fetchProfile = useCallback(async (userId: string) => {
+    setProfileLoading(true);
     const { data } = await supabase.from('profiles').select('role, domains, full_name').eq('id', userId).single();
     if (data?.role) {
       setProfile({
@@ -30,6 +32,7 @@ export default function Navbar() {
         full_name: data.full_name,
       });
     } else setProfile(null);
+    setProfileLoading(false);
   }, []);
 
   useEffect(() => {
@@ -38,6 +41,7 @@ export default function Navbar() {
     supabase.auth.getSession().then(({ data: { session: s } }) => {
       setSession(s);
       if (s?.user) void fetchProfile(s.user.id);
+      else setProfileLoading(false);
     });
 
     const {
@@ -45,7 +49,7 @@ export default function Navbar() {
     } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
       if (s?.user) void fetchProfile(s.user.id);
-      else setProfile(null);
+      else { setProfile(null); setProfileLoading(false); }
     });
 
     return () => subscription.unsubscribe();
@@ -124,9 +128,10 @@ export default function Navbar() {
   const loggedIn = Boolean(session?.user);
   const role = profile?.role;
 
-  // Hide "Estimer avec IA" on expert pages and for expert role
+  // Hide 'Estimer avec IA' for experts and on expert pages.
+  // Also hide during profile loading to prevent a flash (expert sees it briefly).
   const isExpertPage = pathname?.startsWith('/expert');
-  const showEstimateur = role !== 'expert' && !isExpertPage;
+  const showEstimateur = !profileLoading && role !== 'expert' && !isExpertPage;
 
   const navLinkClass =
     'group inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-primary transition-colors px-3 py-2 rounded-xl hover:bg-slate-50';
@@ -272,6 +277,15 @@ export default function Navbar() {
                             <User className="h-4 w-4 text-primary" aria-hidden />
                             Mon profil
                           </Link>
+                          <Link
+                            href="/conversations"
+                            role="menuitem"
+                            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-bgLight"
+                            onClick={() => setUserMenuOpen(false)}
+                          >
+                            <MessageSquare className="h-4 w-4 text-primary" aria-hidden />
+                            Mes conversations
+                          </Link>
                           <button
                             type="button"
                             role="menuitem"
@@ -374,6 +388,10 @@ export default function Navbar() {
                         Administration
                       </Link>
                     )}
+                    <Link href="/conversations" className={navLinkClass} onClick={() => setMobileOpen(false)}>
+                      <MessageSquare className="h-4 w-4 text-slate-400" aria-hidden />
+                      Mes conversations
+                    </Link>
                     <Link href="/account" className={navLinkClass} onClick={() => setMobileOpen(false)}>
                       <User className="h-4 w-4 text-slate-400" aria-hidden />
                       Mon profil
