@@ -85,7 +85,7 @@ export default function LoginPage() {
         if (code === 'email_not_confirmed' || msg.includes('email not confirmed')) {
           setNeedsEmailConfirmation(true);
           setError(
-            'Votre e-mail n’est pas encore confirmé. Utilisez le bouton ci-dessous pour renvoyer le lien, ou désactivez « Confirm email » dans Supabase (Authentication → Providers → Email) en développement.'
+            'Votre compte n’est pas encore vérifié. Cliquez sur le lien envoyé dans votre e-mail pour activer votre compte.'
           );
           setLoading(false);
           return;
@@ -112,6 +112,7 @@ export default function LoginPage() {
 
       const { data: profile } = await supabase.from('profiles').select('role').eq('id', data.user.id).single();
 
+      // Route based on role — 'guest', 'client', or undefined all go to chat
       if (profile?.role === 'expert') router.push('/expert/dashboard');
       else if (profile?.role === 'admin') router.push('/admin/dashboard');
       else router.push('/chat');
