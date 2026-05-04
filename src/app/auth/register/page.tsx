@@ -50,7 +50,14 @@ export default function RegisterPage() {
 
     try {
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const finalDomains = isExpert ? domains.map(d => d === 'autre' && customDomain.trim() ? customDomain.trim() : d) : [];
+      // Explicitly set 'expert' or 'client' — never allow 'guest'
+      const role: 'expert' | 'client' = isExpert ? 'expert' : 'client';
+      // Build the final domains list, replacing 'autre' with the custom value
+      const finalDomains = isExpert
+        ? domains
+            .map(d => (d === 'autre' && customDomain.trim() ? customDomain.trim() : d))
+            .filter(d => d !== 'autre') // Remove bare 'autre' placeholder
+        : []; // Clients have no domains
 
       if (isExpert && finalDomains.length === 0) {
         setError("Veuillez sélectionner au moins un domaine d'expertise.");
@@ -66,24 +73,24 @@ export default function RegisterPage() {
 
       if (signUpError) {
         if (signUpError.message.includes('User already registered')) {
-          throw new Error('Cet email est déjà utilisé.');
+          throw new Error('Cet email est déjà utilisé. Essayez de vous connecter.');
         }
         throw signUpError;
       }
       if (!data.user) throw new Error("Erreur de création de compte");
 
-      const role = isExpert ? 'expert' : 'client';
+      // Create profile with correct role immediately
       const { error: profileError } = await supabase.from('profiles').upsert({
         id: data.user.id,
         email,
         full_name: fullName,
-        role,
+        role, // 'client' or 'expert'
         domains: finalDomains,
-      });
+      }, { onConflict: 'id' });
 
       if (profileError) throw profileError;
 
-      // Récupération de l'ID invité et fusion des données si nécessaire
+      // Merge guest data if the user was browsing as a guest before registering
       const guestId = localStorage.getItem('les_artistes_guest_id');
       if (guestId && guestId !== data.user.id) {
         try {
@@ -96,11 +103,13 @@ export default function RegisterPage() {
         localStorage.removeItem('les_artistes_guest_id');
       }
 
+      // No active session = email confirmation required
       if (!data.session) {
         router.push('/auth/login?registered=1');
         return;
       }
 
+      // Redirect based on role
       if (role === 'expert') router.push('/expert/dashboard');
       else router.push('/chat');
     } catch (err: any) {
