@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 
 interface MessageInputProps {
-  onSend: (text: string, imageBase64: string | null) => void;
+  onSend: (text: string, imageBase64?: string | null) => void;
+  /** When true, hides the "Générer un devis" action button. Use for expert view. */
+  hideDevis?: boolean;
 }
 
-export default function MessageInput({ onSend }: MessageInputProps) {
+export default function MessageInput({ onSend, hideDevis = false }: MessageInputProps) {
   const [text, setText] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -53,16 +55,18 @@ export default function MessageInput({ onSend }: MessageInputProps) {
 
   return (
     <>
-      {/* Action Bar (Devis) */}
-      <div className="bg-white px-4 py-2.5 border-t border-gray-100 flex gap-2 overflow-x-auto scrollbar-hide shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-10">
-        <button 
-          onClick={handleGenerateDevisClick}
-          className="flex-shrink-0 flex items-center space-x-1.5 text-xs font-semibold text-primary bg-blue-50 px-4 py-2 rounded-full hover:bg-blue-100 transition whitespace-nowrap border border-blue-100 shadow-sm"
-        >
-          <svg className="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-          <span>Générer un devis</span>
-        </button>
-      </div>
+      {/* Action Bar — hide devis button for experts */}
+      {!hideDevis && (
+        <div className="bg-white px-4 py-2.5 border-t border-gray-100 flex gap-2 overflow-x-auto scrollbar-hide shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.02)] z-10">
+          <button 
+            onClick={handleGenerateDevisClick}
+            className="flex-shrink-0 flex items-center space-x-1.5 text-xs font-semibold text-primary bg-blue-50 px-4 py-2 rounded-full hover:bg-blue-100 transition whitespace-nowrap border border-blue-100 shadow-sm"
+          >
+            <svg className="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            <span>Générer un devis</span>
+          </button>
+        </div>
+      )}
 
       {/* Input Area */}
       <div className="bg-white p-3 sm:p-4 border-t border-gray-200 flex flex-col">
