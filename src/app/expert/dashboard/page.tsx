@@ -7,7 +7,7 @@ import ChatBubble from '@/components/Chat/ChatBubble';
 import MessageInput from '@/components/Chat/MessageInput';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Bell, Briefcase, CheckCircle, Clock, MessageSquare, Users, Wifi, WifiOff } from 'lucide-react';
+import { Bell, Briefcase, CheckCircle, Clock, MessageSquare, User, Wifi, WifiOff } from 'lucide-react';
 
 export default function ExpertDashboard() {
   const router = useRouter();
@@ -40,13 +40,14 @@ export default function ExpertDashboard() {
           const domains: string[] = data.domains ?? [];
           setExpertDomains(domains);
           setLoadingAuth(false);
+          // Fetch pending requests filtered by this expert's domains
           fetchPendingRequests(domains);
         }
       });
     });
   }, []);
 
-  // ── Realtime new requests (filtered by domain) ────────────────────────────
+  // ── Realtime: new requests filtered by expert's domain ───────────────────
   useEffect(() => {
     if (!expertId || !isSupabaseConfigured) return;
 
@@ -54,14 +55,18 @@ export default function ExpertDashboard() {
       .channel('expert_dashboard_requests')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'support_requests' }, payload => {
         const req = payload.new as any;
-        // Only show if domain matches expert's domains (or expert has no domain filter)
+        // Only notify if domain matches expert's competences
         const matches = expertDomains.length === 0 || expertDomains.includes(req.domain);
         if (req.status === 'pending' && matches) {
-          setRequests(prev => [req, ...prev]);
+          // Fetch client name for the new request
+          supabase.from('profiles').select('full_name').eq('id', req.user_id).single().then(({ data }) => {
+            setRequests(prev => [{ ...req, clientName: data?.full_name || 'Client' }, ...prev]);
+          });
           triggerNotification(`Nouvelle demande — ${req.domain}`);
         }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'support_requests' }, payload => {
+        // Remove from list if no longer pending
         if (payload.new.status !== 'pending') {
           setRequests(prev => prev.filter(r => r.id !== payload.new.id));
         }
@@ -71,17 +76,21 @@ export default function ExpertDashboard() {
     return () => { supabase.removeChannel(requestSub); };
   }, [expertId, expertDomains]);
 
-  // ── Realtime messages for active request ──────────────────────────────────
+  // ── Realtime: messages for the active conversation ────────────────────────
   useEffect(() => {
     if (!activeRequest || !isSupabaseConfigured || !expertId) return;
 
+    // Load full history when joining a conversation
     fetchMessages(activeRequest.id);
 
     const msgSub = supabase
       .channel(`expert_msgs_${activeRequest.id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${activeRequest.id}` }, payload => {
         const m = payload.new as any;
+        // Only add incoming messages (not our own, already added optimistically)
         if (String(m.sender_id) !== String(expertId)) {
+          // Skip the expert-only system join message on client side
+          if (m.role === 'system' && m.content === 'Vous avez rejoint la discussion.') return;
           setMessages(prev => [...prev, {
             id: m.id,
             role: m.role as Message['role'],
@@ -103,13 +112,35 @@ export default function ExpertDashboard() {
     if (Notification.permission === 'granted') new Notification('Les Artistes', { body });
   }
 
+  /**
+   * Fetch pending requests matching this expert's domains.
+   * Also fetches the client name for each request.
+   */
   const fetchPendingRequests = async (domains: string[] = []) => {
     let q = supabase.from('support_requests').select('*').eq('status', 'pending');
     if (domains.length > 0) q = q.in('domain', domains);
     const { data } = await q.order('created_at', { ascending: false });
-    if (data) setRequests(data);
+    if (!data) return;
+
+    // Enrich each request with the client's display name
+    const enriched = await Promise.all(
+      data.map(async (req: any) => {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', req.user_id)
+          .single();
+        return { ...req, clientName: profile?.full_name || 'Client' };
+      })
+    );
+    setRequests(enriched);
   };
 
+  /**
+   * Fetch the full message history for a request and restore it.
+   * Filters out the expert-only "Vous avez rejoint" system message
+   * that should NOT be shown to clients.
+   */
   const fetchMessages = async (requestId: string) => {
     const { data } = await supabase
       .from('messages')
@@ -127,6 +158,10 @@ export default function ExpertDashboard() {
     }
   };
 
+  /**
+   * Accept a request: update DB status, show expert-only join message locally,
+   * then send a welcome message from the expert.
+   */
   const handleAccept = async (request: any) => {
     setJoiningId(request.id);
     const { error } = await supabase
@@ -138,24 +173,25 @@ export default function ExpertDashboard() {
       setActiveRequest(request);
       setRequests(prev => prev.filter(r => r.id !== request.id));
 
-      // Insert join system message visible to both parties
-      const joinMsgId = crypto.randomUUID();
-      await supabase.from('messages').insert({
+      // "Vous avez rejoint la discussion" — expert-only, shown locally, NOT saved to DB
+      // This prevents the client from seeing this message
+      const joinMsgId = `expert-join-${Date.now()}`;
+      setMessages([{
         id: joinMsgId,
-        request_id: request.id,
-        sender_id: expertId,
-        content: 'Vous avez rejoint la discussion.',
         role: 'system',
-        is_image: false,
-      });
-      setMessages([{ id: joinMsgId, role: 'system', content: 'Vous avez rejoint la discussion.' }]);
+        content: 'Vous avez rejoint la discussion.',
+      }]);
 
-      // Welcome message from expert
+      // Send the expert's welcome message to the DB (visible to both)
       await sendExpertMessage(request.id, "Bonjour ! J'ai pris connaissance de l'historique de votre demande. Comment puis-je vous aider ?");
     }
     setJoiningId(null);
   };
 
+  /**
+   * Send a message as the expert — optimistically adds to local state,
+   * then persists to Supabase.
+   */
   const sendExpertMessage = async (requestId: string, text: string) => {
     if (!expertId) return;
     const msgId = crypto.randomUUID();
@@ -187,7 +223,7 @@ export default function ExpertDashboard() {
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent animate-spin" />
-          <p className="text-sm text-gray-500 font-medium">Vérification de l'accès...</p>
+          <p className="text-sm text-gray-500 font-medium">Vérification de l&apos;accès...</p>
         </div>
       </div>
     );
@@ -203,7 +239,7 @@ export default function ExpertDashboard() {
             Ajoutez <code className="bg-gray-100 px-1 rounded text-xs">NEXT_PUBLIC_SUPABASE_URL</code> et{' '}
             <code className="bg-gray-100 px-1 rounded text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code> dans votre fichier <code className="bg-gray-100 px-1 rounded text-xs">.env</code>.
           </p>
-          <Link href="/" className="text-primary font-semibold hover:underline text-sm">← Retour à l'accueil</Link>
+          <Link href="/" className="text-primary font-semibold hover:underline text-sm">← Retour à l&apos;accueil</Link>
         </div>
       </div>
     );
@@ -270,6 +306,11 @@ export default function ExpertDashboard() {
                       {new Date(req.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
+                  {/* Show real client name */}
+                  <p className="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                    <User className="w-3 h-3 text-gray-400" />
+                    {req.clientName || 'Client'}
+                  </p>
                   <p className="text-xs text-gray-600 line-clamp-2 mb-3 leading-relaxed">{req.context}</p>
                   <button
                     onClick={() => handleAccept(req)}
@@ -292,17 +333,18 @@ export default function ExpertDashboard() {
         <main className="flex-1 flex flex-col">
           {activeRequest ? (
             <>
-              {/* Chat Header */}
+              {/* Chat Header — shows client name and domain */}
               <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between shadow-sm">
                 <div className="flex items-center gap-3">
                   <div className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse" />
                   <div>
                     <h3 className="font-bold text-gray-900 text-sm">
-                      Intervention — <span className="text-primary capitalize">{activeRequest.domain}</span>
+                      {activeRequest.clientName || 'Client'} —{' '}
+                      <span className="text-primary capitalize font-medium">{activeRequest.domain}</span>
                     </h3>
                     <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
                       <Wifi className="w-3 h-3 text-green-500" />
-                      Connecté en direct avec le client
+                      Connecté en direct
                     </p>
                   </div>
                 </div>
@@ -314,15 +356,17 @@ export default function ExpertDashboard() {
                 </button>
               </div>
 
-              {/* Messages */}
+              {/* Messages — full history restored on mount */}
               <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-2 bg-gray-50">
                 {messages.map(msg => (
+                  // viewerRole="expert" ensures labels and bubble colors are correct
                   <ChatBubble key={msg.id} message={msg} viewerRole="expert" />
                 ))}
                 <div ref={messagesEndRef} />
               </div>
 
-              <MessageInput onSend={sendMessage} />
+              {/* MessageInput with hideDevis=true — removes "Générer un devis" for experts */}
+              <MessageInput onSend={sendMessage} hideDevis={true} />
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-gray-50">
