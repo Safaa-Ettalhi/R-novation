@@ -97,12 +97,15 @@ export default function ChatPage() {
       .order('created_at', { ascending: true });
 
     if (msgs && msgs.length > 0) {
-      const restored: Message[] = msgs.map((m: any) => ({
-        id: m.id,
-        role: m.role as Role,
-        content: m.content,
-        isImage: m.is_image ?? false,
-      }));
+      const restored: Message[] = msgs
+        // Filter out the expert-only join message — clients must not see it
+        .filter((m: any) => !(m.role === 'system' && m.content === 'Vous avez rejoint la discussion.'))
+        .map((m: any) => ({
+          id: m.id,
+          role: m.role as Role,
+          content: m.content,
+          isImage: m.is_image ?? false,
+        }));
       setMessages(prev => {
         // Keep only the initial IA welcome, then append history
         const welcome = prev.filter(p => p.role === 'ia' && p.id === '1');
@@ -148,6 +151,8 @@ export default function ChatPage() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${realtimeRequestId}` }, payload => {
         const newMsg = payload.new;
         if (String(newMsg.sender_id) !== String(viewerId)) {
+          // Skip expert-only join message — clients must not see "Vous avez rejoint la discussion."
+          if (newMsg.role === 'system' && newMsg.content === 'Vous avez rejoint la discussion.') return;
           setMessages(prev => [...prev, {
             id: newMsg.id,
             role: newMsg.role as Role,
@@ -238,7 +243,7 @@ export default function ChatPage() {
     }
   };
 
-  const handleSendMessage = async (text: string, imageBase64: string | null) => {
+  const handleSendMessage = async (text: string, imageBase64?: string | null) => {
     const tempId = Date.now().toString();
     
     if (imageBase64) {
