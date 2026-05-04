@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { Bell, ChevronDown, Home, LayoutDashboard, LogOut, Menu, User, X } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { ProfileRole } from '@/lib/profile-roles';
 import { IconChatEstimator, IconLogoBuilding } from '@/components/Layout/NavIcons';
 
 export default function Navbar() {
+  const pathname = usePathname();
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null>(null);
   const [profile, setProfile] = useState<{
     role: ProfileRole;
@@ -122,6 +124,10 @@ export default function Navbar() {
   const loggedIn = Boolean(session?.user);
   const role = profile?.role;
 
+  // Hide "Estimer avec IA" on expert pages and for expert role
+  const isExpertPage = pathname?.startsWith('/expert');
+  const showEstimateur = role !== 'expert' && !isExpertPage;
+
   const navLinkClass =
     'group inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-primary transition-colors px-3 py-2 rounded-xl hover:bg-slate-50';
 
@@ -169,7 +175,7 @@ export default function Navbar() {
               </div>
             </Link>
 
-            {/* Desktop */}
+            {/* Desktop Navigation */}
             <div className="hidden items-center gap-1 lg:flex">
               {!loggedIn ? (
                 <>
@@ -188,6 +194,7 @@ export default function Navbar() {
                       Inscription
                     </Link>
                   </div>
+                  {/* "Estimer avec IA" shown on desktop for non-logged guests */}
                   <Link href="/chat#assistant" className={`${ctaPrimaryClass} shrink-0`}>
                     <IconChatEstimator className="h-4 w-4 shrink-0 text-accent" />
                     Estimer avec l&apos;IA
@@ -195,10 +202,13 @@ export default function Navbar() {
                 </>
               ) : (
                 <>
-                  <Link href="/chat#assistant" className={`${ctaPrimaryClass} shrink-0`}>
-                    <IconChatEstimator className="h-4 w-4 shrink-0 text-accent" />
-                    Estimer avec l&apos;IA
-                  </Link>
+                  {/* "Estimer avec IA" hidden for experts */}
+                  {showEstimateur && (
+                    <Link href="/chat#assistant" className={`${ctaPrimaryClass} shrink-0`}>
+                      <IconChatEstimator className="h-4 w-4 shrink-0 text-accent" />
+                      Estimer avec l&apos;IA
+                    </Link>
+                  )}
 
                   {role === 'expert' && (
                     <Link
@@ -279,17 +289,8 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* Mobile */}
+            {/* Mobile Header — no "Estimer avec IA" button here, it's in the burger menu */}
             <div className="flex shrink-0 items-center gap-2 lg:hidden">
-              <Link
-                href="/chat#assistant"
-                aria-label="Estimer avec l’IA — ouvrir le simulateur"
-                className={`${ctaPrimaryClass} max-w-[min(56vw,14rem)] pl-3 pr-3.5 py-2 text-xs sm:max-w-none sm:px-4 sm:py-2.5 sm:text-sm`}
-                onClick={() => setMobileOpen(false)}
-              >
-                <IconChatEstimator className="h-4 w-4 shrink-0 text-accent" />
-                <span className="truncate">Estimer avec l&apos;IA</span>
-              </Link>
               {loggedIn && role === 'expert' && expertPendingCount > 0 && (
                 <Link
                   href="/expert/dashboard"
@@ -312,6 +313,7 @@ export default function Navbar() {
             </div>
           </div>
 
+          {/* Burger / Mobile Menu */}
           {mobileOpen && (
             <div className="border-t border-slate-100 bg-white/95 px-4 py-4 shadow-inner lg:hidden">
               <div className="mx-auto flex max-w-7xl flex-col gap-0.5">
@@ -333,12 +335,33 @@ export default function Navbar() {
                     <Link href="/auth/register" className={navLinkClass} onClick={() => setMobileOpen(false)}>
                       Inscription
                     </Link>
-                    <p className="px-3 pb-2 pt-4 text-center text-[11px] leading-snug text-slate-500">
-                      Simulateur : bouton « Estimer avec l&apos;IA » en haut à droite.
-                    </p>
+                    {/* "Estimer avec IA" in burger menu for guests */}
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <Link
+                        href="/chat#assistant"
+                        className={`${ctaPrimaryClass} w-full justify-center`}
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        <IconChatEstimator className="h-4 w-4 shrink-0 text-accent" />
+                        Estimer avec l&apos;IA
+                      </Link>
+                    </div>
                   </>
                 ) : (
                   <>
+                    {/* "Estimer avec IA" in burger menu for non-expert logged-in users */}
+                    {showEstimateur && (
+                      <div className="mb-3 pb-3 border-b border-slate-100">
+                        <Link
+                          href="/chat#assistant"
+                          className={`${ctaPrimaryClass} w-full justify-center`}
+                          onClick={() => setMobileOpen(false)}
+                        >
+                          <IconChatEstimator className="h-4 w-4 shrink-0 text-accent" />
+                          Estimer avec l&apos;IA
+                        </Link>
+                      </div>
+                    )}
                     {role === 'expert' && (
                       <Link href="/expert/dashboard" className={navLinkClass} onClick={() => setMobileOpen(false)}>
                         <LayoutDashboard className="h-4 w-4 text-slate-400" aria-hidden />
