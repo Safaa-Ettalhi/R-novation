@@ -13,6 +13,8 @@ export interface Message {
   content: string;
   isImage?: boolean;
   isEstimate?: boolean;
+  /** Real full name of the sender (client or expert), shown instead of generic label */
+  senderName?: string;
 }
 
 export default function ChatPage() {
@@ -27,6 +29,8 @@ export default function ChatPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [guestId, setGuestId] = useState<string>('');
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
+  const [clientName, setClientName] = useState<string>(''); // Own name (client)
+  const [expertName, setExpertName] = useState<string>('');  // Connected expert's name
 
   const viewerId = sessionUserId ?? guestId;
 
@@ -59,7 +63,13 @@ export default function ChatPage() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const uid = session?.user?.id ?? null;
       setSessionUserId(uid);
-      if (uid) restoreHistory(uid);
+      if (uid) {
+        restoreHistory(uid);
+        // Fetch the logged-in client's name for display
+        supabase.from('profiles').select('full_name').eq('id', uid).single().then(({ data }) => {
+          if (data?.full_name) setClientName(data.full_name);
+        });
+      }
     });
     const {
       data: { subscription },
@@ -105,11 +115,34 @@ export default function ChatPage() {
           role: m.role as Role,
           content: m.content,
           isImage: m.is_image ?? false,
+          // senderName will be enriched below
         }));
+
+      // Enrich messages with real sender names from profiles
+      const senderIds = [...new Set(msgs.filter((m: any) => m.sender_id).map((m: any) => m.sender_id))];
+      const profileMap: Record<string, string> = {};
+      if (senderIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', senderIds);
+        profiles?.forEach((p: any) => { if (p.full_name) profileMap[p.id] = p.full_name; });
+      }
+
+      const enriched: Message[] = msgs
+        .filter((m: any) => !(m.role === 'system' && m.content === 'Vous avez rejoint la discussion.'))
+        .map((m: any) => ({
+          id: m.id,
+          role: m.role as Role,
+          content: m.content,
+          isImage: m.is_image ?? false,
+          senderName: m.sender_id ? profileMap[m.sender_id] : undefined,
+        }));
+
       setMessages(prev => {
         // Keep only the initial IA welcome, then append history
         const welcome = prev.filter(p => p.role === 'ia' && p.id === '1');
-        return [...welcome, ...restored];
+        return [...welcome, ...enriched];
       });
     }
   };
@@ -122,42 +155,62 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  // Écoute Supabase si on est en matchmaking
+  // Realtime listeners for the current support request
   useEffect(() => {
     if (!realtimeRequestId || !isSupabaseConfigured) return;
 
-    // Écouter les changements sur la demande (ex: un expert accepte)
+    // Listen for request status changes (e.g. expert accepts)
     const requestSub = supabase
       .channel(`public:support_requests:id=eq.${realtimeRequestId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'support_requests', filter: `id=eq.${realtimeRequestId}` }, payload => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'support_requests', filter: `id=eq.${realtimeRequestId}` }, async payload => {
         if (payload.new.status === 'active') {
           setIsMatchmaking(false);
           setIsExpertConnected(true);
+          // Fetch the expert's real name to display in the header and messages
+          if (payload.new.expert_id) {
+            const { data: expProfile } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', payload.new.expert_id)
+              .single();
+            if (expProfile?.full_name) setExpertName(expProfile.full_name);
+          }
           setMessages(prev => [...prev, {
             id: Date.now().toString(),
             role: 'system',
-            content: "Un expert vient de rejoindre la conversation en direct."
+            content: "Un expert vient de rejoindre la conversation en direct.",
           }]);
           if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-            new Notification('Les Artistes', { body: 'Un expert a rejoint la conversation.' });
+            new Notification('Les Artistes', { body: 'Un artisan a rejoint la conversation.' });
           }
         }
       })
       .subscribe();
 
-    // Écouter les nouveaux messages
+    // Listen for new messages
     const messageSub = supabase
       .channel(`public:messages:request_id=eq.${realtimeRequestId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${realtimeRequestId}` }, payload => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `request_id=eq.${realtimeRequestId}` }, async payload => {
         const newMsg = payload.new;
         if (String(newMsg.sender_id) !== String(viewerId)) {
-          // Skip expert-only join message — clients must not see "Vous avez rejoint la discussion."
+          // Skip expert-only join message — clients must not see it
           if (newMsg.role === 'system' && newMsg.content === 'Vous avez rejoint la discussion.') return;
+          // Fetch the sender's name for display
+          let senderName: string | undefined;
+          if (newMsg.sender_id) {
+            const { data: senderProfile } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', newMsg.sender_id)
+              .single();
+            senderName = senderProfile?.full_name ?? undefined;
+          }
           setMessages(prev => [...prev, {
             id: newMsg.id,
             role: newMsg.role as Role,
             content: newMsg.content,
             isImage: newMsg.is_image ?? false,
+            senderName,
           }]);
           setIsTyping(false);
         }
@@ -169,6 +222,7 @@ export default function ChatPage() {
       supabase.removeChannel(messageSub);
     };
   }, [realtimeRequestId, viewerId]);
+
 
   const toggleExpertMode = async () => {
     if (isMatchmaking || isExpertConnected) {
@@ -373,10 +427,12 @@ export default function ChatPage() {
               </div>
               <div>
                 <h2 className="font-bold text-lg leading-tight">
-                  {isExpertConnected ? "Artisan Réel Connecté" : (isExpertMode ? "Expert IA" : "Assistant Les Artistes")}
+                  {isExpertConnected
+                    ? (expertName ? `${expertName} — Artisan` : 'Artisan connecté')
+                    : (isExpertMode ? 'Expert IA' : 'Assistant Les Artistes')}
                 </h2>
                 <p className="text-xs text-blue-200">
-                  {isMatchmaking ? "Recherche en cours..." : "En ligne"}
+                  {isMatchmaking ? 'Recherche en cours...' : 'En ligne'}
                 </p>
               </div>
             </div>
